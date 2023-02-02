@@ -12,5 +12,5 @@ sudo ./install.sh # installs le to /usr/local/bin
 # Usage
 ```bash
 le ~ -w=120 -d=3 -s=0 # list home directory with 3 levels of recursion, don't show hidden files, display names in 120-character field.
-le / -d # list everything on PC (of course if it allows to do so =))
+le / -d=1024 # list everything on PC (of course if it allows to do so =))
 ```
