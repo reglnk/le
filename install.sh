@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/bin/sh
 
-if ! [[ -f "build/le" ]]
+if [ ! -f "build/le" ]
 then
     ./compile.sh
 fi
 
-sudo cp build/le /usr/local/bin
+cp build/le /usr/local/bin
 
