@@ -18,6 +18,26 @@
 #define PD_MEM_ERROR       0x04
 #define PD_STAT_ERROR      0x02
 
+#define DD_MAXOPTCOUNT 32
+
+// Dedicated depth option
+// current behaviour:
+// "mydir" - effect on all dirs/files with name "mydir"
+// todo:
+// "./mydir" - effect on just this path
+// "*dir*" - support for wildcards
+typedef struct {
+	char *spec;
+	int depth;
+}
+dd_opt;
+
+// @todo:
+// support for "--" option, or elsewise specifying directory whose name contains "-"
+
+dd_opt dd_options[DD_MAXOPTCOUNT];
+unsigned dd_optcount = 0;
+
 int getStatInfo (
 	unsigned int raw,
 	char *const special,
@@ -101,7 +121,17 @@ int processDirectory (
 
 		const char *end1 = dt == DT_DIR ? "/" : dt == DT_LNK ? "&" : " ";
 		const int isCpDir = !strcmp(ce->d_name, ".") || !strcmp(ce->d_name, "..");
-		const int toBeHidden = !showHidden && ce->d_name[0] == '.';
+		int toBeHidden = !showHidden && ce->d_name[0] == '.' &&! (dt == DT_DIR && allowRecToHidden);
+		int depthOverride = -1;
+
+		for (unsigned i = 0; i < dd_optcount; ++i) {
+			dd_opt *opt = dd_options + i;
+			if (!strcmp(ce->d_name, opt->spec)) {
+				depthOverride = opt->depth;
+				toBeHidden = !depthOverride;
+				break;
+			}
+		}
 
 		struct stat st;
 		if (stat(namebuffer, &st) != 0)
@@ -142,8 +172,18 @@ int processDirectory (
 			cbPopBuffer();
 		}
 
-		if (curRecursionLvl < maxRecursionLvl && dt == DT_DIR && !isCpDir && (allowRecToHidden || !toBeHidden)) {
-			retcode |= processDirectory(namebuffer, showHidden, allowRecToHidden, curRecursionLvl + 1, maxRecursionLvl, nameWidth);
+		int maxdepth = (depthOverride != -1)
+		? curRecursionLvl - 1 + depthOverride
+		: maxRecursionLvl;
+		if (curRecursionLvl < maxdepth && dt == DT_DIR && !isCpDir && !toBeHidden) {
+			retcode |= processDirectory (
+				namebuffer,
+				showHidden,
+				allowRecToHidden,
+				curRecursionLvl + 1,
+				maxdepth,
+				nameWidth
+			);
 		}
 	}
 	free(entries);
@@ -152,24 +192,31 @@ int processDirectory (
 	return 0;
 }
 
-int getArg(int argc, char **argv, const char *key, char **dest)
+int checkArg(char *argv, const char *key, char **dest)
 {
 	int retcode = 0;
-
-	for (int i = 1; i < argc; ++i) {
-		char *eq = strchr(argv[i], '=');
-		if (eq)
-			*eq = '\0';
-		if (!strcmp(argv[i], key)) {
-			retcode |= GA_FOUND;
-			if (eq && dest) {
-				retcode |= GA_PARAM_FOUND;
-				size_t keylen = strlen(eq + 1);
-				*dest = eq + 1;
-			}
+	char *eq = strchr(argv, '=');
+	if (eq)
+		*eq = '\0';
+	if (!strcmp(argv, key)) {
+		retcode |= GA_FOUND;
+		if (eq && dest) {
+			retcode |= GA_PARAM_FOUND;
+			size_t keylen = strlen(eq + 1);
+			*dest = eq + 1;
 		}
-		if (eq)
-			*eq = '=';
+	}
+	if (eq)
+		*eq = '=';
+	return retcode;
+}
+
+// *pos will be set to the index of next argument to the found one
+int getArg(int argc, char **argv, const char *key, char **dest, int *pos)
+{
+	int retcode = 0;
+	for (int i; !retcode && (i = *pos) < argc; ++*pos) {
+		retcode |= checkArg(argv[i], key, dest);
 	}
 	return retcode;
 }
@@ -188,15 +235,22 @@ int main(int argc, char **argv)
 	int allowRecToHidden = 0;
 	int nameWidth = 40;
 
-	if (getArg(argc, argv, "--help", NULL) & GA_FOUND) {
+	int pos = 1;
+
+	if (getArg(argc, argv, "--help", NULL, &pos) & GA_FOUND) {
 		printf(
-			"Usage: %s <path>\n"
+			"Usage: %s [options...] <path>\n"
 			"    opt=value: desc      (default behaviour, the value if omitted)\n"
 			"\n"
 			"    -s={0,1}: show hidden files if passed with 1       (show,   1)\n"
 			"    -d={int}: set recursion depth                      (   0,  16)\n"
 			"    -r={0,1}: allow recursion to hidden directories    (  no,   1)\n"
-			"    -w={int}: set entry name width                     (  40, 100)\n",
+			"    -w={int}: set entry name width                     (  40, 100)\n"
+			"   -dd={int} <name>: set relative recursion depth     (max-cur, 1)\n"
+			"           0: don't show this entry\n"
+			"           1: show (also works for files, overrides invisibility)\n"
+			"           2: show this directory + files in it\n"
+			"           3: ...\n",
 			argv[0]);
 		return 0;
 	}
@@ -204,34 +258,61 @@ int main(int argc, char **argv)
 	int argfound;
 	char *arg1;
 
-	argfound = getArg(argc, argv, "-s", &arg1);
+	pos = 1;
+	argfound = getArg(argc, argv, "-s", &arg1, &pos);
 	if (argfound & GA_PARAM_FOUND) {
 		showHidden = atoi(arg1);
 	} else if (argfound & GA_FOUND)
 		showHidden = 1;
 
-	argfound = getArg(argc, argv, "-d", &arg1);
+	pos = 1;
+	argfound = getArg(argc, argv, "-d", &arg1, &pos);
 	if (argfound & GA_PARAM_FOUND) {
 		recursionLevel = atoi(arg1);
 	} else if (argfound & GA_FOUND)
 		recursionLevel = 16;
 
-	argfound = getArg(argc, argv, "-r", &arg1);
+	pos = 1;
+	argfound = getArg(argc, argv, "-r", &arg1, &pos);
 	if (argfound & GA_PARAM_FOUND) {
 		allowRecToHidden = atoi(arg1);
 	} else if (argfound & GA_FOUND)
 		allowRecToHidden = 1;
 
-	argfound = getArg(argc, argv, "-w", &arg1);
+	pos = 1;
+	argfound = getArg(argc, argv, "-w", &arg1, &pos);
 	if (argfound & GA_PARAM_FOUND) {
 		nameWidth = atoi(arg1);
 	} else if (argfound & GA_FOUND)
 		nameWidth = 100;
 
+	pos = 1;
+	do {
+		argfound = getArg(argc, argv, "-dd", &arg1, &pos);
+		int param;
+		if (argfound & GA_PARAM_FOUND) {
+			param = atoi(arg1);
+		} else if (argfound & GA_FOUND)
+			param = 1;
+		else break;
+		if (param < 0 || pos >= argc) {
+			printf("-dd: missing or incorrect argument\n");
+			return 1;
+		}
+		if (dd_optcount == DD_MAXOPTCOUNT) {
+			printf("-dd: max options count reached\n");
+			return 1;
+		}
+		dd_options[dd_optcount++] = (dd_opt) {.spec = argv[pos], .depth = param};
+	} while (argfound);
+
 	const char *dirname = ".";
-	argfound = getNextArg(argc, argv, 1);
-	if (argfound != -1)
-		dirname = argv[argfound];
+	for (int i = 1; i < argc; ++i) {
+		if (argv[i][0] != '-' && !checkArg(argv[i - 1], "-dd", NULL)) {
+			dirname = argv[i];
+			break;
+		}
+	}
 
 	return processDirectory(dirname, showHidden, allowRecToHidden, 0, recursionLevel, nameWidth);
 }
