@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define CBAPI_BUFFER_SIZE 1024
-#define CBAPI_BUFFER_TEXT_BEGIN 12
+#define CBAPI_BUFFER_TEXT_BEGIN 0
 
 extern char colorbuf[CBAPI_BUFFER_SIZE];
 
@@ -18,7 +18,7 @@ extern char colorbuf[CBAPI_BUFFER_SIZE];
 } while (0)
 
 #define cbColorv(col) do { \
-	strcpy(cbGetPointer(), "\\\\e[" col "m"); \
+	strcpy(cbGetPointer(), "\x1B[" col "m"); \
 } while(0)
 
 #define cbprintf(...) do { \
@@ -27,8 +27,8 @@ extern char colorbuf[CBAPI_BUFFER_SIZE];
 } while (0)
 
 #define cbPopBuffer() do { \
-	strcpy(cbGetPointer(), "\\\\e[0m\""); \
-	system(colorbuf); \
+	strcpy(cbGetPointer(), "\x1B[0m"); \
+	printf("%s", colorbuf); \
 } while (0)
 
 #endif
