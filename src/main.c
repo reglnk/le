@@ -29,8 +29,73 @@
 typedef struct {
 	char *spec;
 	int depth;
+	int lbrmc; // last branch max count - how many entries to show in directories at the deepmost levels of recursion
 }
 dd_opt;
+
+// find [sample] of length [limit] inside [container] string
+const char *strFind1 (
+	const char *container, // null-terminated string
+	const char *sample, // may be not null-terminated
+	size_t limit
+) {
+	size_t compared = 0;
+	for (size_t i = 0;; ++i) {
+		char c = container[i];
+		if (c == sample[compared]) {
+			++compared;
+			if (compared == limit)
+				return container + i + 1 - limit;
+		} else {
+			if (!c) break;
+			compared = 0;
+		}
+	}
+	return NULL;
+}
+
+// find [sample] of length [limit] inside [container] string of length [length]
+const char *strFind (
+	const char *container, // may be not null-terminated
+	const char *sample, // may be not null-terminated
+	size_t length,
+	size_t limit
+) {
+	size_t compared = 0;
+	for (size_t i = 0; i != length; ++i) {
+		if (container[i] == sample[compared]) {
+			++compared;
+			if (compared == limit)
+				return container + i + 1 - limit;
+		} else compared = 0;
+	}
+	return NULL;
+}
+
+int follows(const char *path, const char *spec)
+{
+	if (!strcmp(path, spec))
+		return 1;
+	int len,
+		left, right; // whether asterisk's present here
+	const char *b, *e; // bounds of pure [spec] word without asterisks
+
+	len = strlen(spec);
+	left = spec[0] == '*';
+	right = len ? (spec[len - 1] == '*') : 0;
+	b = spec + left;
+	e = spec + len - right;
+	len = e - b;
+
+	const size_t plen = strlen(path);
+	const size_t slen = e - b;
+	const char *f = strFind(path, b, plen, slen);
+	if (!f) return 0;
+
+	// distances from begin and end
+	int fb = f - path, fe = path + plen - (f + slen);
+	return !(fb && !left) && !(fe && !right);
+}
 
 // @todo:
 // support for "--" option, or elsewise specifying directory whose name contains "-"
@@ -126,7 +191,7 @@ int processDirectory (
 
 		for (unsigned i = 0; i < dd_optcount; ++i) {
 			dd_opt *opt = dd_options + i;
-			if (!strcmp(ce->d_name, opt->spec)) {
+			if (follows(ce->d_name, opt->spec)) {
 				depthOverride = opt->depth;
 				toBeHidden = !depthOverride;
 				break;
