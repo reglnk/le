@@ -25,7 +25,6 @@
 // "mydir" - effect on all dirs/files with name "mydir"
 // todo:
 // "./mydir" - effect on just this path
-// "*dir*" - support for wildcards
 typedef struct {
 	char *spec;
 	int depth;
@@ -39,6 +38,8 @@ const char *strFind1 (
 	const char *sample, // may be not null-terminated
 	size_t limit
 ) {
+	if (!limit)
+		return container;
 	size_t compared = 0;
 	for (size_t i = 0;; ++i) {
 		char c = container[i];
@@ -61,6 +62,8 @@ const char *strFind (
 	size_t length,
 	size_t limit
 ) {
+	if (!limit)
+		return container;
 	size_t compared = 0;
 	for (size_t i = 0; i != length; ++i) {
 		if (container[i] == sample[compared]) {
@@ -74,27 +77,29 @@ const char *strFind (
 
 int follows(const char *path, const char *spec)
 {
-	if (!strcmp(path, spec))
-		return 1;
 	int len,
-		left, right; // whether asterisk's present here
+		left, right, // whether asterisk's present here
+		ex;
 	const char *b, *e; // bounds of pure [spec] word without asterisks
 
 	len = strlen(spec);
-	left = spec[0] == '*';
-	right = len ? (spec[len - 1] == '*') : 0;
-	b = spec + left;
-	e = spec + len - right;
+	b = spec; e = spec + len;
+	if ((ex = *b == '^')) ++b;
+	if ((left = *b == '*')) ++b;
+	if ((right = len ? (spec[len - 1] == '*') : 0)
+	&&	(size_t)b < (size_t)e)
+		--e;
+
 	len = e - b;
 
 	const size_t plen = strlen(path);
 	const size_t slen = e - b;
 	const char *f = strFind(path, b, plen, slen);
-	if (!f) return 0;
+	if (!f) return ex;
 
 	// distances from begin and end
 	int fb = f - path, fe = path + plen - (f + slen);
-	return !(fb && !left) && !(fe && !right);
+	return ex ^ (!(fb && !left) && !(fe && !right));
 }
 
 // @todo:
@@ -253,7 +258,7 @@ int processDirectory (
 	}
 	free(entries);
 	free(namebuffer);
-	
+
 	return 0;
 }
 
